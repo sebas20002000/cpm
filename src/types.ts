@@ -14,7 +14,12 @@ export interface Task {
 
 export interface Arrow {
     task: Task,
-    totalMargin: number,
+    slack: number,
     source: Node,
     destination: Node
+}
+
+export interface CpmResult {
+    nodes: Node[],
+    arrows: Arrow[]
 }
