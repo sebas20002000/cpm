@@ -2,18 +2,16 @@ import { Task, Arrow, Node } from "./types";
 import getTasksAtNode from './getTasksAtNode'
 
 function main(): void {
-    const a: Task = {
-        id: "A",
-        duration: 4,
-        dependencies: []
-    }
-
     let tasks: Task[] = [
-        a,
+        {
+            id: "A",
+            duration: 4,
+            dependencies: []
+        },
         {
             id: "B",
             duration: 6,
-            dependencies: [a]
+            dependencies: ["A"]
         }
     ]
 

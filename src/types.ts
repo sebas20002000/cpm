@@ -9,7 +9,7 @@ export interface Node {
 export interface Task {
     id: string,
     duration: number,
-    dependencies: Task[]
+    dependencies: string[]
 }
 
 export interface Arrow {
