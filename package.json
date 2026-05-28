@@ -4,11 +4,23 @@
   "description": "",
   "license": "",
   "author": "",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "vite",
+    "build": "tsc -p tsconfig.node.json && vite build",
+    "preview": "vite preview",
+    "ts-node": "ts-node -P src/tsconfig.json src/main.ts"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
     "ts-node": "^10.9.2",
-    "typescript": "^6.0.3"
+    "typescript": "^5.5.3",
+    "vite": "^5.4.0"
   }
 }
