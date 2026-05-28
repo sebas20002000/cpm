@@ -1,0 +1,14 @@
+{
+  "name": "cpm",
+  "version": "1.0.0",
+  "description": "",
+  "license": "",
+  "author": "",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3"
+  }
+}
