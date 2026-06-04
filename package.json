@@ -6,7 +6,7 @@
   "author": "",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host",
     "build": "tsc -p tsconfig.node.json && vite build",
     "preview": "vite preview",
     "ts-node": "ts-node -P src/tsconfig.json src/main.ts"
