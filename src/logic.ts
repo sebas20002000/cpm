@@ -264,16 +264,16 @@ function isDummyArrow(a: Arrow): boolean {
 }
 
 /** Project duration and the critical path(s) — routes start→end using only
- *  zero-slack arrows. Dummy arrows are traversed but omitted from the listing. */
+ *  zero-slack arrows. */
 export function analyzeCpm(result: CpmResult): CpmAnalysis {
     const hasIn = new Set<number>()
     const hasOut = new Set<number>()
     for (const a of result.arrows) { hasIn.add(a.destination.id); hasOut.add(a.source.id) }
 
     const startNodes = result.nodes.filter(n => !hasIn.has(n.id))
-    const endNodes   = result.nodes.filter(n => !hasOut.has(n.id))
-    const duration   = endNodes.reduce((m, n) => Math.max(m, n.earliestStartTime), 0)
-    const endIds     = new Set(endNodes.map(n => n.id))
+    const endNodes = result.nodes.filter(n => !hasOut.has(n.id))
+    const duration = endNodes.reduce((m, n) => Math.max(m, n.earliestStartTime), 0)
+    const endIds = new Set(endNodes.map(n => n.id))
 
     // Adjacency over critical (zero-slack) arrows only.
     const critOut = new Map<number, Arrow[]>()
@@ -290,28 +290,9 @@ export function analyzeCpm(result: CpmResult): CpmAnalysis {
             return
         }
         for (const a of critOut.get(nodeId) ?? [])
-            dfs(a.destination.id, isDummyArrow(a) ? acc : [...acc, a.task.id])
+            dfs(a.destination.id, [...acc, a.task.id])
     }
     for (const s of startNodes) dfs(s.id, [])
 
     return { duration, criticalPaths: paths }
-}
-
-export function flattenGraph(origin: CpmNode): CpmResult {
-    const nodes: CpmNode[] = []
-    const arrows: Arrow[] = []
-    const visited = new Set<number>()
-
-    function traverse(node: CpmNode) {
-        if (visited.has(node.id)) return
-        visited.add(node.id)
-        nodes.push(node)
-        node.output?.forEach(arrow => {
-            arrows.push(arrow)
-            traverse(arrow.destination)
-        })
-    }
-
-    traverse(origin)
-    return { nodes, arrows }
 }

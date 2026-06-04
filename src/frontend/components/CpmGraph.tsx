@@ -184,16 +184,20 @@ function arrowGeometry(
         const exit  = circleEdgePoint(srcPos.x, srcPos.y, R + 2, dstPos.x, dstPos.y)
         const entry = circleEdgePoint(dstPos.x, dstPos.y, R + 2, srcPos.x, srcPos.y)
         pathD = `M ${exit.x} ${exit.y} L ${entry.x} ${entry.y}`
-        mx = (exit.x + entry.x) / 2
-        my = (exit.y + entry.y) / 2
+        // Shift the label off the midpoint for diagonal arrows so that crossing
+        // pairs (e.g. A→D and B→C between the same two levels) don't stack their
+        // labels at the same position. Downward arrows use t=0.33, upward t=0.67.
+        const ydiff = dstPos.y - srcPos.y
+        const tLbl = Math.abs(ydiff) < 1 ? 0.5 : ydiff > 0 ? 0.33 : 0.67
+        mx = exit.x + (entry.x - exit.x) * tLbl
+        my = exit.y + (entry.y - exit.y) * tLbl
         tangent = { x1: exit.x, y1: exit.y, x2: entry.x, y2: entry.y }
     } else {
         // Multi-level: bow vertically away from the centreline to clear the
-        // intermediate nodes. Control points are derived from the node centres,
-        // and the endpoints aim at those control points so the curve enters and
-        // leaves each circle pointing at its centre (no offset arrowheads).
+        // intermediate nodes. Scale bow with levelDiff (no upper cap) so that
+        // curves always stay outside every intermediate node circle.
         const bowDir = (srcPos.y + dstPos.y) / 2 < centerY ? -1 : 1
-        const bow = bowDir * Math.min(NODE_R + 40, 26 * levelDiff)
+        const bow = bowDir * 35 * levelDiff
         const hOffset = Math.abs(dstPos.x - srcPos.x) * 0.35
 
         const c1 = { x: srcPos.x + hOffset, y: srcPos.y + bow }
