@@ -6,6 +6,6 @@ Node
 
 ## Building
 run
-    ’npm install’, and then
-    ’npm run dev’
+ - ’npm install’, and then
+ - ’npm run dev’
 and use the link provided by it
