@@ -84,15 +84,33 @@ function computeLayout(result: CpmResult): Map<number, { x: number; y: number }>
     return positions
 }
 
-function computeViewBox(positions: Map<number, { x: number; y: number }>): string {
-    const PAD = NODE_R + 70
-    const xs = [...positions.values()].map(p => p.x)
-    const ys = [...positions.values()].map(p => p.y)
-    const minX = Math.min(...xs) - PAD
-    const minY = Math.min(...ys) - PAD
-    const width  = Math.max(...xs) - minX + PAD
-    const height = Math.max(...ys) - minY + PAD
-    return `${minX} ${minY} ${width} ${height}`
+// Bounds for the whole drawing. Unlike a node-only box, this also folds in each
+// arrow's curve control points (which bound the cubic) and its label anchors, so
+// bows and labels that reach well outside the node band are never clipped — this
+// is what the SVG export pins its width/height to.
+function computeBounds(
+    nodes: CpmNode[],
+    positions: Map<number, { x: number; y: number }>,
+    geometries: ArrowGeometry[],
+): ViewBox {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    const ext = (x: number, y: number) => {
+        minX = Math.min(minX, x); minY = Math.min(minY, y)
+        maxX = Math.max(maxX, x); maxY = Math.max(maxY, y)
+    }
+    for (const n of nodes) {
+        const p = positions.get(n.id)
+        if (!p) continue
+        ext(p.x - NODE_R, p.y - NODE_R)
+        ext(p.x + NODE_R, p.y + NODE_R)
+    }
+    for (const g of geometries) {
+        for (const pt of g.points) ext(pt.x, pt.y)
+        ext(g.tx, g.ty)
+        ext(g.sx, g.sy)
+    }
+    const PAD = 30
+    return { x: minX - PAD, y: minY - PAD, w: maxX - minX + 2 * PAD, h: maxY - minY + 2 * PAD }
 }
 
 // ── Geometry helpers ──────────────────────────────────────────────────────────
@@ -110,6 +128,26 @@ function perpUnit(x1: number, y1: number, x2: number, y2: number): { dx: number;
     const len = Math.hypot(x2 - x1, y2 - y1)
     if (len === 0) return { dx: 0, dy: -1 }
     return { dx: -(y2 - y1) / len, dy: (x2 - x1) / len }
+}
+
+type Pt = { x: number; y: number }
+
+/** Point on a cubic Bézier at parameter t ∈ [0,1]. */
+function cubicAt(t: number, p0: Pt, p1: Pt, p2: Pt, p3: Pt): Pt {
+    const u = 1 - t
+    const a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t
+    return { x: a * p0.x + b * p1.x + c * p2.x + d * p3.x, y: a * p0.y + b * p1.y + c * p2.y + d * p3.y }
+}
+
+/** True when no sampled point of the cubic comes within `minDist` of any obstacle. */
+function curveClears(p0: Pt, p1: Pt, p2: Pt, p3: Pt, obstacles: Pt[], minDist: number): boolean {
+    const SAMPLES = 24
+    for (const o of obstacles)
+        for (let i = 0; i <= SAMPLES; i++) {
+            const pt = cubicAt(i / SAMPLES, p0, p1, p2, p3)
+            if (Math.hypot(pt.x - o.x, pt.y - o.y) < minDist) return false
+        }
+    return true
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -162,6 +200,9 @@ interface ArrowGeometry {
     /** slack-label anchor (below the line) */
     sx: number; sy: number
     dummy: boolean
+    /** the path's defining points (endpoints + control points) — used to bound
+     *  the drawing for the viewBox/export. */
+    points: Pt[]
 }
 
 function arrowGeometry(
@@ -171,6 +212,7 @@ function arrowGeometry(
     levelDiff: number,
     centerY: number,
     dummy: boolean,
+    obstacles: Pt[],
 ): ArrowGeometry {
     const R = NODE_R
 
@@ -178,6 +220,7 @@ function arrowGeometry(
     let mx: number
     let my: number
     let tangent: { x1: number; y1: number; x2: number; y2: number }
+    let points: Pt[]
 
     if (levelDiff <= 1) {
         // Straight segment: endpoints aim at each other's centre.
@@ -192,24 +235,35 @@ function arrowGeometry(
         mx = exit.x + (entry.x - exit.x) * tLbl
         my = exit.y + (entry.y - exit.y) * tLbl
         tangent = { x1: exit.x, y1: exit.y, x2: entry.x, y2: entry.y }
+        points = [exit, entry]
     } else {
         // Multi-level: bow vertically away from the centreline to clear the
-        // intermediate nodes. Scale bow with levelDiff (no upper cap) so that
-        // curves always stay outside every intermediate node circle.
+        // intermediate nodes. The starting bow scales with levelDiff; if the
+        // curve still grazes an in-between node we grow the bow and recompute
+        // until it clears (collision-aware routing), so arrows never disappear
+        // behind a node they merely pass over.
         const bowDir = (srcPos.y + dstPos.y) / 2 < centerY ? -1 : 1
-        const bow = bowDir * 35 * levelDiff
         const hOffset = Math.abs(dstPos.x - srcPos.x) * 0.35
+        const clearance = R + 8
 
-        const c1 = { x: srcPos.x + hOffset, y: srcPos.y + bow }
-        const c2 = { x: dstPos.x - hOffset, y: dstPos.y + bow }
-        const exit  = circleEdgePoint(srcPos.x, srcPos.y, R + 2, c1.x, c1.y)
-        const entry = circleEdgePoint(dstPos.x, dstPos.y, R + 2, c2.x, c2.y)
+        let exit!: Pt, entry!: Pt, c1!: Pt, c2!: Pt
+        let bowMag = 35 * levelDiff
+        for (let iter = 0; iter < 14; iter++) {
+            const bow = bowDir * bowMag
+            c1 = { x: srcPos.x + hOffset, y: srcPos.y + bow }
+            c2 = { x: dstPos.x - hOffset, y: dstPos.y + bow }
+            exit  = circleEdgePoint(srcPos.x, srcPos.y, R + 2, c1.x, c1.y)
+            entry = circleEdgePoint(dstPos.x, dstPos.y, R + 2, c2.x, c2.y)
+            if (curveClears(exit, c1, c2, entry, obstacles, clearance)) break
+            bowMag += 28
+        }
 
         pathD = `M ${exit.x} ${exit.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${entry.x} ${entry.y}`
         // Cubic midpoint (t = 0.5) for label placement.
         mx = 0.125 * exit.x + 0.375 * c1.x + 0.375 * c2.x + 0.125 * entry.x
         my = 0.125 * exit.y + 0.375 * c1.y + 0.375 * c2.y + 0.125 * entry.y
         tangent = { x1: c1.x, y1: c1.y, x2: c2.x, y2: c2.y }
+        points = [exit, c1, c2, entry]
     }
 
     // Perpendicular pointing "down" in screen space, so the task label always
@@ -224,6 +278,7 @@ function arrowGeometry(
         tx: mx - dx * LABEL_OFFSET, ty: my - dy * LABEL_OFFSET,
         sx: mx + dx * LABEL_OFFSET, sy: my + dy * LABEL_OFFSET,
         dummy,
+        points,
     }
 }
 
@@ -234,11 +289,6 @@ interface Props {
 }
 
 interface ViewBox { x: number; y: number; w: number; h: number }
-
-function parseViewBox(s: string): ViewBox {
-    const [x, y, w, h] = s.split(' ').map(Number)
-    return { x, y, w, h }
-}
 
 /** Convert a client (screen) coordinate to the svg's user coordinate space. */
 function clientToSvg(svg: SVGSVGElement, cx: number, cy: number): { x: number; y: number } {
@@ -271,10 +321,17 @@ export default function CpmGraph({ result }: Props) {
             const srcLevel = levelMap.get(arrow.source.id) ?? 0
             const dstLevel = levelMap.get(arrow.destination.id) ?? 0
             const isDummy = arrow.task.duration === 0 && /^Y\d+$/.test(arrow.task.id)
-            return [arrowGeometry(arrow, srcPos, dstPos, dstLevel - srcLevel, centerY, isDummy)]
+            // Every node except this arrow's own endpoints is an obstacle the
+            // curve must steer clear of.
+            const obstacles = result.nodes.flatMap(n => {
+                if (n.id === arrow.source.id || n.id === arrow.destination.id) return []
+                const p = positions.get(n.id)
+                return p ? [p] : []
+            })
+            return [arrowGeometry(arrow, srcPos, dstPos, dstLevel - srcLevel, centerY, isDummy, obstacles)]
         })
 
-        return { geometries, positions, baseVB: parseViewBox(computeViewBox(positions)) }
+        return { geometries, positions, baseVB: computeBounds(result.nodes, positions, geometries) }
     }, [result])
 
     const [vb, setVB] = useState<ViewBox>(baseVB)
