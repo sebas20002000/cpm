@@ -16,6 +16,11 @@ body {
     padding: 1rem 1.5rem;
 }
 
+/* Avoid horizontal scroll from wide content (e.g. the task table) on phones */
+html, body {
+    overflow-x: hidden;
+}
+
 /* ── Workspace: input panel on the left, live graph on the right ── */
 
 .workspace {
@@ -51,11 +56,57 @@ body {
     }
 }
 
+/* ── Phones ── */
+@media (max-width: 600px) {
+    .app {
+        margin: 0.5rem auto;
+        padding: 0.75rem;
+    }
+
+    h1 {
+        font-size: 1.25rem;
+    }
+
+    .task-input {
+        padding: 1rem;
+    }
+
+    /* Tighten the table so all four columns fit a narrow viewport */
+    .task-table {
+        font-size: 0.85rem;
+    }
+    .task-table th,
+    .task-table td {
+        padding: 0.3rem 0.3rem;
+    }
+
+    /* 16px input text stops iOS Safari from auto-zooming on focus */
+    .task-table input[type="text"],
+    .task-table input[type="number"] {
+        font-size: 16px;
+        padding: 0.45rem 0.4rem;
+    }
+
+    /* Larger tap targets for the graph's floating controls */
+    .graph-toolbar-overlay button {
+        width: 2.5rem;
+        height: 2.5rem;
+        font-size: 1.15rem;
+    }
+
+    /* Roomier remove button so it's comfortable to tap */
+    .btn-remove {
+        font-size: 1.3rem;
+        padding: 0.35rem 0.5rem;
+    }
+}
+
 .app-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
+    flex-wrap: wrap;
     margin-bottom: 1.5rem;
 }
 
@@ -192,7 +243,9 @@ button:hover {
     border: 1px solid #ddd;
     border-radius: 6px;
     overflow: hidden;
-    height: 520px;
+    /* Cap the height to the viewport on short / mobile screens so the graph and
+       the summary below it stay reachable without the canvas dominating. */
+    height: min(520px, 65vh);
 }
 
 .graph-container--fullscreen,
