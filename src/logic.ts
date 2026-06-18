@@ -149,6 +149,7 @@ export function calculateCPM(tasks: Task[]): CpmResult | null {
 
     const headOf = new Map<string, MNode>() // taskId → node where task's arrow ends
     const joinFor = new Map<string, MNode>() // predecessor-set key → join node
+    const joinSets: { set: Set<string>; node: MNode }[] = [] // join nodes + their pred-sets
 
     for (const task of sorted) {
         const ps = preds.get(task.id)!
@@ -165,11 +166,29 @@ export function calculateCPM(tasks: Task[]): CpmResult | null {
                 const jn = mkNode()
                 nodes.push(jn)
                 joinFor.set(key, jn)
-                for (const p of ps) {
+
+                // Chain onto existing join nodes whose predecessor-set is a subset
+                // of this one, instead of re-fanning a dummy from every predecessor.
+                // e.g. {E,C} ⊂ {D,E,C}: run one dummy from the {E,C} join into the
+                // {D,E,C} join rather than wiring E and C in a second time. Subsets
+                // are taken greedily largest-first and kept disjoint.
+                const uncovered = new Set(ps)
+                const subsets = joinSets
+                    .filter(j => j.set.size < ps.length && [...j.set].every(x => uncovered.has(x)))
+                    .sort((a, b) => b.set.size - a.set.size)
+                for (const cand of subsets) {
+                    if (![...cand.set].every(x => uncovered.has(x))) continue // overlapped by an earlier pick
+                    if (!cand.node.output.some(a => a.destination === jn))
+                        arrows.push(mkDummy(cand.node, jn))
+                    cand.set.forEach(x => uncovered.delete(x))
+                }
+                for (const p of uncovered) {
                     const ph = headOf.get(p)!
                     if (!ph.output.some(a => a.destination === jn))
                         arrows.push(mkDummy(ph, jn))
                 }
+
+                joinSets.push({ set: new Set(ps), node: jn })
             }
             tail = joinFor.get(key)!
         }
