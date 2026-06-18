@@ -54,6 +54,11 @@ html, body {
         position: static;
         max-height: none;
     }
+    /* In column mode the parent's align-items: flex-start stops items from
+       filling the width — make the graph span the full row. */
+    .workspace-graph {
+        width: 100%;
+    }
 }
 
 /* ── Phones ── */

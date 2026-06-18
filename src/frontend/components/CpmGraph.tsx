@@ -302,6 +302,10 @@ export default function CpmGraph({ result }: Props) {
     const containerRef = useRef<HTMLDivElement>(null)
     const svgRef = useRef<SVGSVGElement>(null)
     const panRef = useRef<{ x: number; y: number } | null>(null)
+    // Active touch/pen/mouse pointers, keyed by pointerId, for multi-touch pinch.
+    const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map())
+    // Last two-finger state (gap distance + midpoint) while a pinch is in flight.
+    const pinchRef = useRef<{ dist: number; midX: number; midY: number } | null>(null)
 
     // Layout + arrow geometry only depend on the result; memoise them.
     const { geometries, positions, baseVB } = React.useMemo(() => {
@@ -369,11 +373,68 @@ export default function CpmGraph({ result }: Props) {
         return () => svg.removeEventListener('wheel', onWheel)
     }, [baseVB])
 
-    function onPointerDown(e: React.PointerEvent<SVGSVGElement>) {
-        panRef.current = { x: e.clientX, y: e.clientY }
-        e.currentTarget.setPointerCapture(e.pointerId)
+    // Multiply the current zoom by `factor` (>1 zooms in), keeping the world
+    // point under (clientX, clientY) fixed on screen. Shared by wheel + pinch.
+    function zoomAtClient(factor: number, clientX: number, clientY: number) {
+        const svg = svgRef.current
+        if (!svg) return
+        const p = clientToSvg(svg, clientX, clientY)
+        setVB(prev => {
+            const scale = clamp((baseVB.w / prev.w) * factor, MIN_SCALE, MAX_SCALE)
+            const w = baseVB.w / scale
+            const h = baseVB.h / scale
+            const fx = (p.x - prev.x) / prev.w
+            const fy = (p.y - prev.y) / prev.h
+            return { x: p.x - fx * w, y: p.y - fy * h, w, h }
+        })
     }
+
+    // Snapshot of the two live pointers' gap + midpoint, for pinch tracking.
+    function pinchState() {
+        const pts = [...pointersRef.current.values()]
+        return {
+            dist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y),
+            midX: (pts[0].x + pts[1].x) / 2,
+            midY: (pts[0].y + pts[1].y) / 2,
+        }
+    }
+
+    function onPointerDown(e: React.PointerEvent<SVGSVGElement>) {
+        e.currentTarget.setPointerCapture(e.pointerId)
+        pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+        if (pointersRef.current.size === 2) {
+            // Second finger down — switch from panning to pinch-zoom.
+            panRef.current = null
+            pinchRef.current = pinchState()
+        } else if (pointersRef.current.size === 1) {
+            panRef.current = { x: e.clientX, y: e.clientY }
+        }
+    }
+
     function onPointerMove(e: React.PointerEvent<SVGSVGElement>) {
+        if (!pointersRef.current.has(e.pointerId)) return
+        pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+        // Two fingers: pinch-zoom about the midpoint, and pan with it.
+        if (pointersRef.current.size >= 2) {
+            const cur = pinchState()
+            const prev = pinchRef.current
+            if (prev && svgRef.current) {
+                const ctm = svgRef.current.getScreenCTM()
+                if (ctm) {
+                    const panDx = (cur.midX - prev.midX) / ctm.a
+                    const panDy = (cur.midY - prev.midY) / ctm.d
+                    if (panDx || panDy)
+                        setVB(v => ({ ...v, x: v.x - panDx, y: v.y - panDy }))
+                }
+                if (prev.dist > 0 && cur.dist > 0)
+                    zoomAtClient(cur.dist / prev.dist, cur.midX, cur.midY)
+            }
+            pinchRef.current = cur
+            return
+        }
+
+        // One finger: pan.
         if (!panRef.current || !svgRef.current) return
         const ctm = svgRef.current.getScreenCTM()
         if (!ctm) return
@@ -382,10 +443,16 @@ export default function CpmGraph({ result }: Props) {
         panRef.current = { x: e.clientX, y: e.clientY }
         setVB(prev => ({ ...prev, x: prev.x - dx, y: prev.y - dy }))
     }
+
     function endPan(e: React.PointerEvent<SVGSVGElement>) {
-        panRef.current = null
+        pointersRef.current.delete(e.pointerId)
         if (e.currentTarget.hasPointerCapture(e.pointerId))
             e.currentTarget.releasePointerCapture(e.pointerId)
+
+        if (pointersRef.current.size < 2) pinchRef.current = null
+        // Resume panning from whichever finger is still down (avoids a jump).
+        const [remaining] = pointersRef.current.values()
+        panRef.current = remaining ? { x: remaining.x, y: remaining.y } : null
     }
 
     function zoomBy(factor: number) {
